@@ -10,18 +10,19 @@ No TUI. Console commands only.
 
 For sections 1-4, use the shared RSDK host setup script instead of running each
 command manually. This host setup is target-agnostic: it prepares Docker,
-clones/updates RSDK, installs the DevContainer CLI, applies generic RSDK
-compatibility fixes, and starts the DevContainer. The ROCK 5B specific part is
-the separate patch script that runs after host setup.
+clones/updates RSDK, installs the DevContainer CLI, configures the host
+PATH/launcher, applies DevContainer compatibility settings, and starts the
+DevContainer. The ROCK 5B specific part is the separate patch script that runs
+after host setup.
 
 ```bash
 chmod +x \
-  bookworm_complete_install_guide/bookworm_rsdk_host_steps_1_4.sh \
-  bookworm_complete_install_guide/rock5b_bookworm_patch_rsdk.sh
+  scripts/rsdk_setup/bookworm_rsdk_host_steps_1_4.sh \
+  scripts/rock_5b/rock5b_bookworm_patch_rsdk.sh
 
-bookworm_complete_install_guide/bookworm_rsdk_host_steps_1_4.sh
+scripts/rsdk_setup/bookworm_rsdk_host_steps_1_4.sh
 
-bookworm_complete_install_guide/rock5b_bookworm_patch_rsdk.sh --rsdk-dir ~/rsdk
+scripts/rock_5b/rock5b_bookworm_patch_rsdk.sh --rsdk-dir ~/rsdk
 ```
 
 The script also supports being run directly as `root`; in that case it targets
@@ -37,21 +38,21 @@ is only `rsdk devcon`.
 If the script says Docker group membership needs a reboot or new login, do that before normal manual Docker work. After reboot/login, verify the host setup with:
 
 ```bash
-bookworm_complete_install_guide/bookworm_rsdk_host_steps_1_4.sh --check-only
+scripts/rsdk_setup/bookworm_rsdk_host_steps_1_4.sh --check-only
 ```
 
 Useful options:
 
 ```bash
-bookworm_complete_install_guide/bookworm_rsdk_host_steps_1_4.sh --dry-run
-bookworm_complete_install_guide/bookworm_rsdk_host_steps_1_4.sh --yes
-bookworm_complete_install_guide/bookworm_rsdk_host_steps_1_4.sh --skip-apt-upgrade
-bookworm_complete_install_guide/bookworm_rsdk_host_steps_1_4.sh --skip-docker-hello
-bookworm_complete_install_guide/bookworm_rsdk_host_steps_1_4.sh --skip-docker-network-test
-bookworm_complete_install_guide/bookworm_rsdk_host_steps_1_4.sh --force-devcontainer-hostnet-workaround
-bookworm_complete_install_guide/bookworm_rsdk_host_steps_1_4.sh --no-devcontainer-hostnet-workaround
-bookworm_complete_install_guide/bookworm_rsdk_host_steps_1_4.sh --allow-kvm-world-access
-bookworm_complete_install_guide/bookworm_rsdk_host_steps_1_4.sh --reboot-if-needed
+scripts/rsdk_setup/bookworm_rsdk_host_steps_1_4.sh --dry-run
+scripts/rsdk_setup/bookworm_rsdk_host_steps_1_4.sh --yes
+scripts/rsdk_setup/bookworm_rsdk_host_steps_1_4.sh --skip-apt-upgrade
+scripts/rsdk_setup/bookworm_rsdk_host_steps_1_4.sh --skip-docker-hello
+scripts/rsdk_setup/bookworm_rsdk_host_steps_1_4.sh --skip-docker-network-test
+scripts/rsdk_setup/bookworm_rsdk_host_steps_1_4.sh --force-devcontainer-hostnet-workaround
+scripts/rsdk_setup/bookworm_rsdk_host_steps_1_4.sh --no-devcontainer-hostnet-workaround
+scripts/rsdk_setup/bookworm_rsdk_host_steps_1_4.sh --allow-kvm-world-access
+scripts/rsdk_setup/bookworm_rsdk_host_steps_1_4.sh --reboot-if-needed
 ```
 
 If `/dev/kvm` exists, the setup script reports whether KVM acceleration is
@@ -282,7 +283,7 @@ When the bridge test fails and the host-network test succeeds, the script can
 apply the affected-VM workaround:
 
 ```bash
-bookworm_complete_install_guide/bookworm_rsdk_host_steps_1_4.sh --force-devcontainer-hostnet-workaround
+scripts/rsdk_setup/bookworm_rsdk_host_steps_1_4.sh --force-devcontainer-hostnet-workaround
 ```
 
 In automatic mode, the script applies the workaround only when it detects the

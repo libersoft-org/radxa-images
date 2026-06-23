@@ -2,10 +2,7 @@
 set -Eeuo pipefail
 
 SCRIPT_NAME="$(basename "$0")"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RSDK_REPO_URL="https://github.com/RadxaOS-SDK/rsdk.git"
-RSDK_PATCH_SCRIPT_NAME="rock5b_bookworm_patch_rsdk.sh"
-RSDK_PATCH_SCRIPT_SOURCE="$SCRIPT_DIR/$RSDK_PATCH_SCRIPT_NAME"
 RSDK_DIR_ARG=""
 RSDK_WORKSPACE_DIR_ARG="${RSDK_WORKSPACE_DIR:-}"
 LOG_DIR_ARG=""
@@ -63,11 +60,11 @@ usage() {
   cat <<EOF
 Usage: $SCRIPT_NAME [options]
 
-Runs steps 1-4 from rock5b_bookworm_cli_repo_readme_en.md on the host PC:
+Runs the shared Bookworm RSDK host setup on the build host:
   1. Host dependencies
   2. Docker permissions
   3. Clone/update RSDK
-  4. RSDK patching, DevContainer CLI, host PATH, and DevContainer startup
+  4. DevContainer CLI, host PATH, DevContainer configuration, and startup
 
 Options:
   --rsdk-dir DIR          RSDK checkout directory. Default: ~/rsdk, or /workspaces/rsdk when run as root.
@@ -76,13 +73,13 @@ Options:
   --rsdk-owner-user USER  Advanced: use USER uid/gid for checkout ownership.
                           Only use when it matches DevContainer vscode ownership requirements.
   --repo-url URL          RSDK git URL. Default: $RSDK_REPO_URL
-  --log-dir DIR           Log directory. Default: ~/.local/state/rock5b-bookworm-setup
+  --log-dir DIR           Log directory. Default: ~/.local/state/rsdk-bookworm-setup
   --skip-apt-upgrade      Run apt update/install, but skip apt upgrade.
   --skip-docker-hello     Skip 'docker run --rm hello-world'.
   --skip-docker-network-test
                           Skip Docker container egress/DNS tests.
   --no-devcontainer-hostnet-workaround
-                          Detect broken bridge networking, but do not patch DevContainer/buildx.
+                          Detect broken bridge networking, but do not configure DevContainer/buildx.
   --force-devcontainer-hostnet-workaround
                           Apply DevContainer/buildx host-network workaround even if bridge networking works.
   --allow-kvm-world-access
@@ -344,7 +341,7 @@ resolve_target_user() {
   fi
 
   if [ "$LOG_DIR_ARG" = "" ]; then
-    LOG_DIR_ARG="$TARGET_HOME/.local/state/rock5b-bookworm-setup"
+    LOG_DIR_ARG="$TARGET_HOME/.local/state/rsdk-bookworm-setup"
   else
     LOG_DIR_ARG="$(expand_for_target_user "$LOG_DIR_ARG")"
   fi
@@ -1047,8 +1044,8 @@ patch_rsdk_devcon_node_heap_guard() {
   node - "$file" <<'NODE'
 const fs = require("fs");
 const file = process.argv[2];
-const start = "\t# BEGIN rock5b host setup Node heap guard";
-const end = "\t# END rock5b host setup Node heap guard";
+const start = "\t# BEGIN rsdk host setup Node heap guard";
+const end = "\t# END rsdk host setup Node heap guard";
 const block = [
   "",
   start,
@@ -1065,6 +1062,7 @@ const block = [
 
 let text = fs.readFileSync(file, "utf8");
 text = text.replace(/\n\t# BEGIN rock5b host setup Node heap guard[\s\S]*?\n\t# END rock5b host setup Node heap guard\n?/g, "\n");
+text = text.replace(/\n\t# BEGIN rsdk host setup Node heap guard[\s\S]*?\n\t# END rsdk host setup Node heap guard\n?/g, "\n");
 
 if (!text.includes(start)) {
   const sourceLine = '\tsource "$SCRIPT_DIR/../../lib/rsdk/utils.sh"';
@@ -1156,9 +1154,14 @@ if (kvmGroupAdd) {
     data.runArgs.push("--group-add", kvmGroupAdd);
   }
 }
-if (resetRootUser || data["x-rock5b-host-setup-root-user-override"] === true) {
+if (
+  resetRootUser ||
+  data["x-rsdk-host-setup-root-user-override"] === true ||
+  data["x-rock5b-host-setup-root-user-override"] === true
+) {
   if (data.remoteUser === "root") delete data.remoteUser;
   if (data.containerUser === "root") delete data.containerUser;
+  delete data["x-rsdk-host-setup-root-user-override"];
   delete data["x-rock5b-host-setup-root-user-override"];
 }
 data.updateContentCommand = "command -v devenv >/dev/null || true";
@@ -1261,7 +1264,7 @@ docker_target_cmd_prefix() {
 
 docker_apt_test() {
   local mode="$1"
-  local cname="rock5b-nettest-${mode}-$$"
+  local cname="rsdk-nettest-${mode}-$$"
   local network_arg=()
   local status=0
   local prefix
@@ -1465,7 +1468,7 @@ verify_rsdk_devcon_node_heap_guard() {
   info "Verifying RSDK devcontainer launcher Node heap guard."
 
   [ -f "$file" ] || die "$file is missing."
-  grep -q 'BEGIN rock5b host setup Node heap guard' "$file" || die "$file is missing the Node heap guard patch."
+  grep -q 'BEGIN rsdk host setup Node heap guard' "$file" || die "$file is missing the Node heap guard patch."
   grep -q 'max-old-space-size=${DEVCONTAINER_NODE_OLD_SPACE_MB:-8192}' "$file" || die "$file does not set the DevContainer Node heap limit."
   ok "$file sets NODE_OPTIONS before running devcontainer."
 }
@@ -1548,16 +1551,6 @@ verify_hostnet_buildx_builder() {
   ok "buildx builder rsdk-hostnet exists."
 }
 
-verify_rsdk_patch_artifacts() {
-  info "Verifying RSDK patch script and build helper."
-
-  [ -x "$RSDK_DIR/$RSDK_PATCH_SCRIPT_NAME" ] || die "RSDK patch script is missing or not executable: $RSDK_DIR/$RSDK_PATCH_SCRIPT_NAME"
-  [ -x "$RSDK_DIR/build-rock5b-bookworm-cli.sh" ] || die "Build helper is missing or not executable: $RSDK_DIR/build-rock5b-bookworm-cli.sh"
-
-  run_user_in_dir "$RSDK_DIR" "./$RSDK_PATCH_SCRIPT_NAME" --rsdk-dir "$RSDK_DIR" --check-only
-  ok "RSDK patch script and build helper are ready."
-}
-
 verify_rsdk_workspace_and_ownership() {
   if [ "$(id -u)" -eq 0 ]; then
     info "Verifying root-run RSDK workspace path."
@@ -1602,93 +1595,6 @@ verify_final_state() {
   verify_rsdk_devcon_node_heap_guard
   verify_devcontainer_json_config
   verify_hostnet_buildx_builder
-  verify_rsdk_patch_artifacts
-}
-
-patch_rsdk_image_cmdline_fallback() {
-  info "Patching RSDK image generation fallback for missing /etc/kernel/cmdline."
-
-  if [ "$DRY_RUN" -eq 1 ]; then
-    info "+ patch RSDK image templates to derive cmdline from /boot/extlinux/extlinux.conf when /etc/kernel/cmdline is absent"
-    return 0
-  fi
-
-  [ -d "$RSDK_DIR" ] || die "$RSDK_DIR does not exist; cannot patch RSDK image templates."
-  command -v node >/dev/null 2>&1 || die "node is required to patch RSDK image templates."
-
-  node - "$RSDK_DIR" <<'NODE'
-const fs = require("fs");
-const path = require("path");
-
-const root = process.argv[2];
-const files = [
-  "src/share/rsdk/build/image.jsonnet",
-  "src/share/rsdk/build/lib/image/deploy_rootfs.jsonnet",
-];
-
-const oldBlock = `copy-out /etc/kernel/cmdline "%(temp_dir)s"
-    copy-out /boot/extlinux/extlinux.conf "%(temp_dir)s"`;
-
-const newBlock = `copy-out /boot/extlinux/extlinux.conf "%(temp_dir)s"
-    !awk '/^[[:space:]]*[Aa][Pp][Pp][Ee][Nn][Dd][[:space:]]+/ {sub(/^[[:space:]]*[Aa][Pp][Pp][Ee][Nn][Dd][[:space:]]+/, ""); print; found=1; exit} END{if (!found) exit 1}' "%(temp_dir)s/extlinux.conf" > "%(temp_dir)s/cmdline" || printf "rw rootwait console=ttyFIQ0,1500000 console=tty1\\n" > "%(temp_dir)s/cmdline"`;
-
-let patched = 0;
-
-for (const rel of files) {
-  const file = path.join(root, rel);
-  if (!fs.existsSync(file)) {
-    throw new Error(`${rel} is missing`);
-  }
-
-  const original = fs.readFileSync(file, "utf8");
-  const hasCmdlineFallback =
-    original.includes(`copy-out /boot/extlinux/extlinux.conf "%(temp_dir)s"`) &&
-    original.includes(`> "%(temp_dir)s/cmdline" || printf "rw rootwait console=ttyFIQ0,1500000 console=tty1`);
-
-  if (original.includes(newBlock) || hasCmdlineFallback) {
-    console.log(`already patched ${rel}`);
-    continue;
-  }
-
-  if (!original.includes(oldBlock)) {
-    throw new Error(`expected cmdline copy block not found in ${rel}`);
-  }
-
-  const backup = `${file}.bak-cmdline-fallback`;
-  if (!fs.existsSync(backup)) {
-    fs.copyFileSync(file, backup);
-  }
-
-  fs.writeFileSync(file, original.replace(oldBlock, newBlock));
-  console.log(`patched ${rel}`);
-  patched += 1;
-}
-
-console.log(`cmdline fallback patch complete; changed ${patched} file(s)`);
-NODE
-
-  ok "RSDK image templates will derive cmdline from extlinux.conf when /etc/kernel/cmdline is absent."
-}
-
-install_and_run_rsdk_patch_script() {
-  local target="$RSDK_DIR/$RSDK_PATCH_SCRIPT_NAME"
-
-  info "Installing and running RSDK ROCK 5B Bookworm patch script."
-
-  if [ "$DRY_RUN" -eq 1 ]; then
-    info "+ install $(printf '%q' "$RSDK_PATCH_SCRIPT_SOURCE") $(printf '%q' "$target")"
-    info "+ cd $(printf '%q' "$RSDK_DIR") && ./$(printf '%q' "$RSDK_PATCH_SCRIPT_NAME") --rsdk-dir $(printf '%q' "$RSDK_DIR")"
-    return 0
-  fi
-
-  [ -f "$RSDK_PATCH_SCRIPT_SOURCE" ] || die "Missing patch script next to host setup script: $RSDK_PATCH_SCRIPT_SOURCE"
-  [ -d "$RSDK_DIR" ] || die "$RSDK_DIR does not exist; cannot install RSDK patch script."
-
-  install -m 0755 "$RSDK_PATCH_SCRIPT_SOURCE" "$target"
-  run_user_in_dir "$RSDK_DIR" "./$RSDK_PATCH_SCRIPT_NAME" --rsdk-dir "$RSDK_DIR"
-  [ -x "$RSDK_DIR/build-rock5b-bookworm-cli.sh" ] || die "RSDK patch script did not create executable build-rock5b-bookworm-cli.sh."
-
-  ok "RSDK patch script and build helper are installed in $RSDK_DIR."
 }
 
 start_rsdk_devcontainer() {
@@ -1812,8 +1718,6 @@ main() {
   evaluate_docker_network
   finalize_devcontainer_uid_patch_after_network
   clone_or_update_rsdk
-  patch_rsdk_image_cmdline_fallback
-  install_and_run_rsdk_patch_script
   install_devcontainer_cli_and_path
   apply_devcontainer_json_patches
   patch_rsdk_devcon_node_heap_guard
