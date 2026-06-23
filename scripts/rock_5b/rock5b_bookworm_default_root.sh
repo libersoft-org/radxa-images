@@ -171,6 +171,40 @@ write_file_as_root() {
   as_root tee "$path" >/dev/null
 }
 
+ensure_openssh_server_in_rootfs() {
+  if as_root chroot "$ROOTFS_EDIT" /bin/bash -c 'dpkg-query -W -f="${Status}" openssh-server 2>/dev/null | grep -q "install ok installed"'; then
+    ok "openssh-server is installed."
+    return 0
+  fi
+
+  info "openssh-server is missing; installing it into the rootfs."
+  as_root chroot "$ROOTFS_EDIT" /bin/bash -c 'apt-get update'
+  as_root chroot "$ROOTFS_EDIT" /bin/bash -c 'DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openssh-server'
+}
+
+enable_systemd_unit_in_rootfs() {
+  local unit="$1"
+  local unit_file="$unit"
+
+  if as_root chroot "$ROOTFS_EDIT" /bin/bash -c "systemctl enable '$unit'"; then
+    return 0
+  fi
+
+  warn "systemctl enable $unit failed in chroot; creating wants symlink directly."
+  if [ ! -e "$ROOTFS_EDIT/lib/systemd/system/$unit_file" ] && [ ! -e "$ROOTFS_EDIT/usr/lib/systemd/system/$unit_file" ] && [[ "$unit_file" == *@*.service ]]; then
+    unit_file="${unit_file%@*}@.service"
+  fi
+
+  [ -e "$ROOTFS_EDIT/lib/systemd/system/$unit_file" ] || [ -e "$ROOTFS_EDIT/usr/lib/systemd/system/$unit_file" ] || die "Missing systemd unit in rootfs: $unit"
+  as_root mkdir -p "$ROOTFS_EDIT/etc/systemd/system/multi-user.target.wants"
+
+  if [ -e "$ROOTFS_EDIT/lib/systemd/system/$unit_file" ]; then
+    as_root ln -sf "/lib/systemd/system/$unit_file" "$ROOTFS_EDIT/etc/systemd/system/multi-user.target.wants/$unit"
+  else
+    as_root ln -sf "/usr/lib/systemd/system/$unit_file" "$ROOTFS_EDIT/etc/systemd/system/multi-user.target.wants/$unit"
+  fi
+}
+
 set_default_root_in_rootfs() {
   local backup
 
@@ -187,14 +221,16 @@ set_default_root_in_rootfs() {
   as_root chroot "$ROOTFS_EDIT" /bin/bash -c 'passwd -u root || true'
   as_root chroot "$ROOTFS_EDIT" /bin/bash -c 'usermod -s /bin/bash root'
 
-  info "Enabling SSH root login."
+  info "Enabling SSH server and root login."
+  ensure_openssh_server_in_rootfs
   as_root mkdir -p "$ROOTFS_EDIT/etc/ssh/sshd_config.d"
   write_file_as_root "$ROOTFS_EDIT/etc/ssh/sshd_config.d/99-root-login.conf" <<'EOF'
 PermitRootLogin yes
 PasswordAuthentication yes
 KbdInteractiveAuthentication yes
 EOF
-  as_root chroot "$ROOTFS_EDIT" /bin/bash -c 'systemctl enable ssh || true'
+  as_root chroot "$ROOTFS_EDIT" /bin/bash -c 'ssh-keygen -A'
+  enable_systemd_unit_in_rootfs ssh.service
 
   info "Enabling tty1 root autologin."
   as_root mkdir -p "$ROOTFS_EDIT/etc/systemd/system/getty@tty1.service.d"
@@ -203,7 +239,7 @@ EOF
 ExecStart=
 ExecStart=-/sbin/agetty --autologin root --noclear %I $TERM
 EOF
-  as_root chroot "$ROOTFS_EDIT" /bin/bash -c 'systemctl enable getty@tty1.service || true'
+  enable_systemd_unit_in_rootfs getty@tty1.service
 
   info "Writing login notice."
   write_file_as_root "$ROOTFS_EDIT/etc/issue" <<'EOF'
