@@ -35,30 +35,30 @@ RSDK checkout, DevContainer CLI, host PATH/launcher configuration, compatibility
 settings, and `rsdk devcon up`.
 
 ```sh
-chmod +x scripts/rsdk_setup/bookworm_rsdk_host_steps_1_4.sh
+chmod +x scripts/rsdk_setup/rsdk_host_setup.sh
 
-scripts/rsdk_setup/bookworm_rsdk_host_steps_1_4.sh
+scripts/rsdk_setup/rsdk_host_setup.sh
 ```
 
 If the script says Docker group membership needs a reboot or a new login, do
 that before continuing. After reboot/login, verify the setup:
 
 ```sh
-scripts/rsdk_setup/bookworm_rsdk_host_steps_1_4.sh --check-only
+scripts/rsdk_setup/rsdk_host_setup.sh --check-only
 ```
 
 Useful options:
 
 ```sh
-scripts/rsdk_setup/bookworm_rsdk_host_steps_1_4.sh --dry-run
-scripts/rsdk_setup/bookworm_rsdk_host_steps_1_4.sh --yes
-scripts/rsdk_setup/bookworm_rsdk_host_steps_1_4.sh --skip-apt-upgrade
-scripts/rsdk_setup/bookworm_rsdk_host_steps_1_4.sh --skip-docker-hello
-scripts/rsdk_setup/bookworm_rsdk_host_steps_1_4.sh --skip-docker-network-test
-scripts/rsdk_setup/bookworm_rsdk_host_steps_1_4.sh --force-devcontainer-hostnet-workaround
-scripts/rsdk_setup/bookworm_rsdk_host_steps_1_4.sh --no-devcontainer-hostnet-workaround
-scripts/rsdk_setup/bookworm_rsdk_host_steps_1_4.sh --allow-kvm-world-access
-scripts/rsdk_setup/bookworm_rsdk_host_steps_1_4.sh --reboot-if-needed
+scripts/rsdk_setup/rsdk_host_setup.sh --dry-run
+scripts/rsdk_setup/rsdk_host_setup.sh --yes
+scripts/rsdk_setup/rsdk_host_setup.sh --skip-apt-upgrade
+scripts/rsdk_setup/rsdk_host_setup.sh --skip-docker-hello
+scripts/rsdk_setup/rsdk_host_setup.sh --skip-docker-network-test
+scripts/rsdk_setup/rsdk_host_setup.sh --force-devcontainer-hostnet-workaround
+scripts/rsdk_setup/rsdk_host_setup.sh --no-devcontainer-hostnet-workaround
+scripts/rsdk_setup/rsdk_host_setup.sh --allow-kvm-world-access
+scripts/rsdk_setup/rsdk_host_setup.sh --reboot-if-needed
 ```
 
 ## 3.
