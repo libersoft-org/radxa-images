@@ -89,6 +89,20 @@ cd /workspaces/rsdk
 ./build-rock5b-bookworm-cli.sh
 ```
 
+Optional, enable default root access in the built image:
+
+```sh
+./set-rock5b-default-root.sh
+```
+
+This sets:
+
+```text
+root password: root
+SSH root login: enabled
+tty1 root autologin: enabled
+```
+
 The output image is created here:
 
 ```text
