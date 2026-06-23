@@ -186,11 +186,12 @@ enable_systemd_unit_in_rootfs() {
   local unit="$1"
   local unit_file="$unit"
 
-  if as_root chroot "$ROOTFS_EDIT" /bin/bash -c "systemctl enable '$unit' && systemctl is-enabled --quiet '$unit'"; then
+  if as_root systemctl --root="$ROOTFS_EDIT" enable "$unit" &&
+    as_root systemctl --root="$ROOTFS_EDIT" is-enabled --quiet "$unit"; then
     return 0
   fi
 
-  warn "systemctl enable $unit did not leave the unit enabled in chroot; creating wants symlink directly."
+  warn "systemctl enable $unit did not leave the unit enabled in rootfs; creating wants symlink directly."
   if [ ! -e "$ROOTFS_EDIT/lib/systemd/system/$unit_file" ] && [ ! -e "$ROOTFS_EDIT/usr/lib/systemd/system/$unit_file" ] && [[ "$unit_file" == *@*.service ]]; then
     unit_file="${unit_file%@*}@.service"
   fi
@@ -204,7 +205,18 @@ enable_systemd_unit_in_rootfs() {
     as_root ln -sf "/usr/lib/systemd/system/$unit_file" "$ROOTFS_EDIT/etc/systemd/system/multi-user.target.wants/$unit"
   fi
 
-  as_root chroot "$ROOTFS_EDIT" /bin/bash -c "systemctl is-enabled --quiet '$unit'" || die "Failed to enable systemd unit in rootfs: $unit"
+  as_root systemctl --root="$ROOTFS_EDIT" is-enabled --quiet "$unit" || die "Failed to enable systemd unit in rootfs: $unit"
+}
+
+verify_rootfs_tar_path() {
+  local path="$1"
+
+  if as_root tar -tf rootfs.tar | grep -Eq "^\\.?/?$path$"; then
+    ok "Verified in rootfs.tar: $path"
+    return 0
+  fi
+
+  die "Packed rootfs.tar does not contain expected path: $path"
 }
 
 set_default_root_in_rootfs() {
@@ -263,6 +275,9 @@ EOF
 
   info "Cleaning temporary rootfs edit directory."
   as_root rm -rf "$ROOTFS_EDIT"
+
+  verify_rootfs_tar_path "etc/systemd/system/multi-user.target.wants/ssh.service"
+  verify_rootfs_tar_path "etc/ssh/sshd_config.d/99-root-login.conf"
 
   ok "Rootfs updated."
   ls -lh rootfs.tar "$backup"
