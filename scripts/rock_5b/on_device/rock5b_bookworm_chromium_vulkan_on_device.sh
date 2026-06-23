@@ -16,10 +16,18 @@ MESA_TAG="${MESA_TAG:-mesa-25.3.6}"
 SPIRV_TOOLS_TAG="${SPIRV_TOOLS_TAG:-v2024.1}"
 SPIRV_HEADERS_TAG="${SPIRV_HEADERS_TAG:-vulkan-sdk-1.3.280.0}"
 JOBS="${JOBS:-$(nproc 2>/dev/null || printf '4')}"
-MESA_PREBUILT_URL="${MESA_PREBUILT_URL:-}"
+DEFAULT_MESA_PREBUILT_URL="https://github.com/libersoft-org/radxa-images/releases/latest/download/rock5b-mesa-panvk-bookworm-aarch64.tar.zst"
+DEFAULT_MESA_PREBUILT_SHA256_URL="https://github.com/libersoft-org/radxa-images/releases/latest/download/rock5b-mesa-panvk-bookworm-aarch64.tar.zst.sha256"
+MESA_PREBUILT_URL="${MESA_PREBUILT_URL:-$DEFAULT_MESA_PREBUILT_URL}"
+MESA_PREBUILT_SHA256_URL="${MESA_PREBUILT_SHA256_URL:-}"
 MESA_PREBUILT_ARCHIVE="${MESA_PREBUILT_ARCHIVE:-}"
 MODE="${MODE:-auto}"
 SKIP_CHROMIUM_VERIFY="${SKIP_CHROMIUM_VERIFY:-0}"
+MESA_PREBUILT_SHA256_EXPLICIT=0
+
+if [ "${MESA_PREBUILT_SHA256_URL:-}" != "" ]; then
+  MESA_PREBUILT_SHA256_EXPLICIT=1
+fi
 
 usage() {
   cat <<EOF
@@ -30,13 +38,18 @@ Vulkan/PanVK on a clean rooted ROCK 5B Bookworm CLI image, starts X on the local
 display, opens chrome://gpu, and verifies that Chromium reports Vulkan as
 enabled.
 
-Default mode builds Mesa locally. If --mesa-archive or --mesa-url is provided,
-the script installs that prebuilt Mesa archive instead.
+Default mode installs the official prebuilt Mesa PanVK bundle from the latest
+GitHub release:
+  $DEFAULT_MESA_PREBUILT_URL
+
+Use --build-mesa only when you explicitly want the slow local source-build
+fallback/debug mode.
 
 Options:
-  --build-mesa             Force local Mesa build.
+  --build-mesa             Force slow local SPIRV-Tools + Mesa source build.
   --mesa-archive PATH      Install Mesa from a local tar archive.
   --mesa-url URL           Download and install Mesa from a tar archive URL.
+  --mesa-sha256-url URL    Download checksum and verify the Mesa archive.
   --mesa-tag TAG           Mesa git tag for local build. Default: $MESA_TAG
   --jobs N                 Parallel build jobs. Default: nproc
   --skip-chromium-verify   Leave Chromium open even if DevTools verification is skipped.
@@ -44,6 +57,7 @@ Options:
 
 Environment:
   MESA_PREBUILT_URL        Same as --mesa-url.
+  MESA_PREBUILT_SHA256_URL Same as --mesa-sha256-url.
   MESA_PREBUILT_ARCHIVE    Same as --mesa-archive.
   CHROMIUM_URL             URL to open. Default: chrome://gpu
   DISPLAY_NUMBER           X display number. Default: 0
@@ -98,6 +112,12 @@ parse_args() {
         MODE="prebuilt"
         shift 2
         ;;
+      --mesa-sha256-url)
+        [ "${2:-}" != "" ] || die "--mesa-sha256-url requires a value"
+        MESA_PREBUILT_SHA256_URL="$2"
+        MESA_PREBUILT_SHA256_EXPLICIT=1
+        shift 2
+        ;;
       --mesa-tag)
         [ "${2:-}" != "" ] || die "--mesa-tag requires a value"
         MESA_TAG="$2"
@@ -124,11 +144,7 @@ parse_args() {
 
   case "$MODE" in
     auto)
-      if [ "$MESA_PREBUILT_ARCHIVE" != "" ] || [ "$MESA_PREBUILT_URL" != "" ]; then
-        MODE="prebuilt"
-      else
-        MODE="build"
-      fi
+      MODE="prebuilt"
       ;;
     build | prebuilt)
       ;;
@@ -321,15 +337,83 @@ build_mesa() {
   ninja -C build install
 }
 
+url_filename() {
+  local url="$1"
+  local path="${url%%\?*}"
+  local filename="${path##*/}"
+
+  if [ "$filename" = "" ] || [ "$filename" = "$path" ]; then
+    printf 'rock5b-mesa-prebuilt.tar.zst'
+  else
+    printf '%s' "$filename"
+  fi
+}
+
+download_mesa_checksum() {
+  local checksum_url="$1"
+  local checksum_file="$2"
+  local mandatory="$3"
+
+  if curl -L --fail --retry 3 -o "$checksum_file" "$checksum_url"; then
+    return 0
+  fi
+
+  rm -f "$checksum_file"
+  if [ "$mandatory" = "1" ]; then
+    die "Could not download required Mesa checksum: $checksum_url"
+  fi
+
+  warn "Mesa checksum not available at $checksum_url; continuing without checksum verification."
+  return 1
+}
+
+verify_mesa_archive_checksum() {
+  local archive="$1"
+  local checksum_url="$2"
+  local mandatory="$3"
+  local checksum_file="${archive}.sha256"
+  local archive_dir
+
+  [ "$checksum_url" != "" ] || return 0
+
+  log "Verify prebuilt Mesa checksum"
+  if ! download_mesa_checksum "$checksum_url" "$checksum_file" "$mandatory"; then
+    return 0
+  fi
+
+  archive_dir="$(dirname "$archive")"
+  (
+    cd "$archive_dir"
+    sha256sum -c "$checksum_file"
+  ) || die "Mesa checksum verification failed for $archive"
+}
+
 install_prebuilt_mesa() {
   local archive="$MESA_PREBUILT_ARCHIVE"
+  local checksum_url="$MESA_PREBUILT_SHA256_URL"
+  local checksum_mandatory=0
 
   log "Install prebuilt Mesa"
 
   if [ "$archive" = "" ]; then
     [ "$MESA_PREBUILT_URL" != "" ] || die "Set MESA_PREBUILT_URL or pass --mesa-url/--mesa-archive."
-    archive="/tmp/rock5b-mesa-prebuilt.tar.zst"
+    archive="/tmp/$(url_filename "$MESA_PREBUILT_URL")"
     curl -L --fail --retry 3 -o "$archive" "$MESA_PREBUILT_URL"
+
+    if [ "$checksum_url" = "" ]; then
+      if [ "$MESA_PREBUILT_URL" = "$DEFAULT_MESA_PREBUILT_URL" ]; then
+        checksum_url="$DEFAULT_MESA_PREBUILT_SHA256_URL"
+        checksum_mandatory=1
+      else
+        checksum_url="${MESA_PREBUILT_URL}.sha256"
+      fi
+    elif [ "$MESA_PREBUILT_SHA256_EXPLICIT" = "1" ]; then
+      checksum_mandatory=1
+    fi
+
+    verify_mesa_archive_checksum "$archive" "$checksum_url" "$checksum_mandatory"
+  elif [ "$checksum_url" != "" ]; then
+    verify_mesa_archive_checksum "$archive" "$checksum_url" "$MESA_PREBUILT_SHA256_EXPLICIT"
   fi
 
   [ -f "$archive" ] || die "Mesa archive not found: $archive"
