@@ -186,11 +186,11 @@ enable_systemd_unit_in_rootfs() {
   local unit="$1"
   local unit_file="$unit"
 
-  if as_root chroot "$ROOTFS_EDIT" /bin/bash -c "systemctl enable '$unit'"; then
+  if as_root chroot "$ROOTFS_EDIT" /bin/bash -c "systemctl enable '$unit' && systemctl is-enabled --quiet '$unit'"; then
     return 0
   fi
 
-  warn "systemctl enable $unit failed in chroot; creating wants symlink directly."
+  warn "systemctl enable $unit did not leave the unit enabled in chroot; creating wants symlink directly."
   if [ ! -e "$ROOTFS_EDIT/lib/systemd/system/$unit_file" ] && [ ! -e "$ROOTFS_EDIT/usr/lib/systemd/system/$unit_file" ] && [[ "$unit_file" == *@*.service ]]; then
     unit_file="${unit_file%@*}@.service"
   fi
@@ -203,6 +203,8 @@ enable_systemd_unit_in_rootfs() {
   else
     as_root ln -sf "/usr/lib/systemd/system/$unit_file" "$ROOTFS_EDIT/etc/systemd/system/multi-user.target.wants/$unit"
   fi
+
+  as_root chroot "$ROOTFS_EDIT" /bin/bash -c "systemctl is-enabled --quiet '$unit'" || die "Failed to enable systemd unit in rootfs: $unit"
 }
 
 set_default_root_in_rootfs() {
