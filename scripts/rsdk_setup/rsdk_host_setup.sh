@@ -9,6 +9,7 @@ LOG_DIR_ARG=""
 MIN_FREE_GB="${MIN_FREE_GB:-40}"
 RECOMMENDED_FREE_GB="${RECOMMENDED_FREE_GB:-60}"
 DOCKER_NETWORK_TEST_TIMEOUT="${DOCKER_NETWORK_TEST_TIMEOUT:-15}"
+DOCKER_NETWORK_TEST_IMAGE="${DOCKER_NETWORK_TEST_IMAGE:-debian:stable-slim}"
 ENABLE_DEVCONTAINER_HOSTNET_WORKAROUND="${ENABLE_DEVCONTAINER_HOSTNET_WORKAROUND:-auto}"
 DEVCONTAINER_NODE_OLD_SPACE_MB="${DEVCONTAINER_NODE_OLD_SPACE_MB:-8192}"
 ASSUME_YES=0
@@ -60,7 +61,7 @@ usage() {
   cat <<EOF
 Usage: $SCRIPT_NAME [options]
 
-Runs the shared Bookworm RSDK host setup on the build host:
+Runs the shared RSDK host setup on the build host:
   1. Host dependencies
   2. Docker permissions
   3. Clone/update RSDK
@@ -73,7 +74,7 @@ Options:
   --rsdk-owner-user USER  Advanced: use USER uid/gid for checkout ownership.
                           Only use when it matches DevContainer vscode ownership requirements.
   --repo-url URL          RSDK git URL. Default: $RSDK_REPO_URL
-  --log-dir DIR           Log directory. Default: ~/.local/state/rsdk-bookworm-setup
+  --log-dir DIR           Log directory. Default: ~/.local/state/rsdk-host-setup
   --skip-apt-upgrade      Run apt update/install, but skip apt upgrade.
   --skip-docker-hello     Skip 'docker run --rm hello-world'.
   --skip-docker-network-test
@@ -99,6 +100,9 @@ Environment:
   RECOMMENDED_FREE_GB     Recommended free space in GB. Default: 60.
   DOCKER_NETWORK_TEST_TIMEOUT
                           Seconds before Docker container egress/DNS tests time out. Default: 15.
+  DOCKER_NETWORK_TEST_IMAGE
+                          Docker image used for container egress/DNS tests.
+                          Default: debian:stable-slim.
   ENABLE_DEVCONTAINER_HOSTNET_WORKAROUND
                           auto, yes, or no. Default: auto.
   DEVCONTAINER_NODE_OLD_SPACE_MB
@@ -341,7 +345,7 @@ resolve_target_user() {
   fi
 
   if [ "$LOG_DIR_ARG" = "" ]; then
-    LOG_DIR_ARG="$TARGET_HOME/.local/state/rsdk-bookworm-setup"
+    LOG_DIR_ARG="$TARGET_HOME/.local/state/rsdk-host-setup"
   else
     LOG_DIR_ARG="$(expand_for_target_user "$LOG_DIR_ARG")"
   fi
@@ -364,10 +368,10 @@ resolve_rsdk_owner() {
 setup_logging() {
   local stamp
   stamp="$(date +%Y%m%d-%H%M%S)"
-  LOG_FILE="$LOG_DIR_ARG/host-steps-1-4-$stamp.log"
+  LOG_FILE="$LOG_DIR_ARG/rsdk-host-setup-$stamp.log"
 
   if [ "$DRY_RUN" -eq 1 ]; then
-    LOG_FILE="/tmp/host-steps-1-4-$stamp.dry-run.log"
+    LOG_FILE="/tmp/rsdk-host-setup-$stamp.dry-run.log"
     exec > >(tee -a "$LOG_FILE") 2>&1
     return 0
   fi
@@ -867,7 +871,7 @@ detect_devcontainer_owner_from_image() {
   [ "$RSDK_OWNER_USER" = "" ] || return 0
   [ "$DRY_RUN" -eq 0 ] || return 0
 
-  local image="mcr.microsoft.com/devcontainers/base:bookworm"
+  local image="mcr.microsoft.com/devcontainers/base:ubuntu"
   local uid=""
   local gid=""
 
@@ -956,7 +960,7 @@ append_rsdk_path_to_bashrc() {
 }
 
 rsdk_launcher_is_managed() {
-  [ -f "$RSDK_LAUNCHER" ] && grep -Eq 'Managed by (rock5b_bookworm_host_steps_1_4|bookworm_rsdk_host_steps_1_4)\.sh' "$RSDK_LAUNCHER"
+  [ -f "$RSDK_LAUNCHER" ] && grep -Eq 'Managed by .*(host_steps_1_4|rsdk_host_setup)\.sh' "$RSDK_LAUNCHER"
 }
 
 install_rsdk_launcher() {
@@ -981,7 +985,7 @@ install_rsdk_launcher() {
 
   {
     printf '#!/usr/bin/env bash\n'
-    printf '# Managed by bookworm_rsdk_host_steps_1_4.sh\n'
+    printf '# Managed by rsdk_host_setup.sh\n'
     printf 'set -Eeuo pipefail\n'
     printf 'RSDK_DIR=%s\n' "$quoted_dir"
     printf 'TARGET_USER=%s\n' "$quoted_user"
@@ -1282,17 +1286,17 @@ docker_apt_test() {
 
   if [ "$DRY_RUN" -eq 1 ]; then
     prefix="$(docker_target_cmd_prefix)"
-    info "+ timeout $DOCKER_NETWORK_TEST_TIMEOUT $prefix run --name $cname --rm ${network_arg[*]} debian:bookworm bash -lc 'apt-get -o Acquire::Retries=0 update'"
+    info "+ timeout $DOCKER_NETWORK_TEST_TIMEOUT $prefix run --name $cname --rm ${network_arg[*]} $DOCKER_NETWORK_TEST_IMAGE bash -lc 'apt-get -o Acquire::Retries=0 update'"
     return 0
   fi
 
   docker_as_target rm -f "$cname" >/dev/null 2>&1 || true
   if [ "$(id -u)" -eq 0 ] && [ "$TARGET_USER" != "root" ]; then
-    timeout "$DOCKER_NETWORK_TEST_TIMEOUT" sudo -H -u "$TARGET_USER" docker run --name "$cname" --rm "${network_arg[@]}" debian:bookworm bash -lc 'apt-get -o Acquire::Retries=0 update' >/dev/null 2>&1 || status=$?
+    timeout "$DOCKER_NETWORK_TEST_TIMEOUT" sudo -H -u "$TARGET_USER" docker run --name "$cname" --rm "${network_arg[@]}" "$DOCKER_NETWORK_TEST_IMAGE" bash -lc 'apt-get -o Acquire::Retries=0 update' >/dev/null 2>&1 || status=$?
   elif [ "$(id -u)" -ne 0 ] && ! current_shell_has_group docker; then
-    timeout "$DOCKER_NETWORK_TEST_TIMEOUT" sudo -H -u "$TARGET_USER" docker run --name "$cname" --rm "${network_arg[@]}" debian:bookworm bash -lc 'apt-get -o Acquire::Retries=0 update' >/dev/null 2>&1 || status=$?
+    timeout "$DOCKER_NETWORK_TEST_TIMEOUT" sudo -H -u "$TARGET_USER" docker run --name "$cname" --rm "${network_arg[@]}" "$DOCKER_NETWORK_TEST_IMAGE" bash -lc 'apt-get -o Acquire::Retries=0 update' >/dev/null 2>&1 || status=$?
   else
-    timeout "$DOCKER_NETWORK_TEST_TIMEOUT" docker run --name "$cname" --rm "${network_arg[@]}" debian:bookworm bash -lc 'apt-get -o Acquire::Retries=0 update' >/dev/null 2>&1 || status=$?
+    timeout "$DOCKER_NETWORK_TEST_TIMEOUT" docker run --name "$cname" --rm "${network_arg[@]}" "$DOCKER_NETWORK_TEST_IMAGE" bash -lc 'apt-get -o Acquire::Retries=0 update' >/dev/null 2>&1 || status=$?
   fi
   docker_as_target rm -f "$cname" >/dev/null 2>&1 || true
 

@@ -17,10 +17,10 @@ after host setup.
 
 ```bash
 chmod +x \
-  scripts/rsdk_setup/bookworm_rsdk_host_steps_1_4.sh \
+  scripts/rsdk_setup/rsdk_host_setup.sh \
   scripts/rock_5b/rock5b_bookworm_patch_rsdk.sh
 
-scripts/rsdk_setup/bookworm_rsdk_host_steps_1_4.sh
+scripts/rsdk_setup/rsdk_host_setup.sh
 
 scripts/rock_5b/rock5b_bookworm_patch_rsdk.sh --rsdk-dir ~/rsdk
 ```
@@ -38,21 +38,21 @@ is only `rsdk devcon`.
 If the script says Docker group membership needs a reboot or new login, do that before normal manual Docker work. After reboot/login, verify the host setup with:
 
 ```bash
-scripts/rsdk_setup/bookworm_rsdk_host_steps_1_4.sh --check-only
+scripts/rsdk_setup/rsdk_host_setup.sh --check-only
 ```
 
 Useful options:
 
 ```bash
-scripts/rsdk_setup/bookworm_rsdk_host_steps_1_4.sh --dry-run
-scripts/rsdk_setup/bookworm_rsdk_host_steps_1_4.sh --yes
-scripts/rsdk_setup/bookworm_rsdk_host_steps_1_4.sh --skip-apt-upgrade
-scripts/rsdk_setup/bookworm_rsdk_host_steps_1_4.sh --skip-docker-hello
-scripts/rsdk_setup/bookworm_rsdk_host_steps_1_4.sh --skip-docker-network-test
-scripts/rsdk_setup/bookworm_rsdk_host_steps_1_4.sh --force-devcontainer-hostnet-workaround
-scripts/rsdk_setup/bookworm_rsdk_host_steps_1_4.sh --no-devcontainer-hostnet-workaround
-scripts/rsdk_setup/bookworm_rsdk_host_steps_1_4.sh --allow-kvm-world-access
-scripts/rsdk_setup/bookworm_rsdk_host_steps_1_4.sh --reboot-if-needed
+scripts/rsdk_setup/rsdk_host_setup.sh --dry-run
+scripts/rsdk_setup/rsdk_host_setup.sh --yes
+scripts/rsdk_setup/rsdk_host_setup.sh --skip-apt-upgrade
+scripts/rsdk_setup/rsdk_host_setup.sh --skip-docker-hello
+scripts/rsdk_setup/rsdk_host_setup.sh --skip-docker-network-test
+scripts/rsdk_setup/rsdk_host_setup.sh --force-devcontainer-hostnet-workaround
+scripts/rsdk_setup/rsdk_host_setup.sh --no-devcontainer-hostnet-workaround
+scripts/rsdk_setup/rsdk_host_setup.sh --allow-kvm-world-access
+scripts/rsdk_setup/rsdk_host_setup.sh --reboot-if-needed
 ```
 
 If `/dev/kvm` exists, the setup script reports whether KVM acceleration is
@@ -269,8 +269,8 @@ Permission denied on devenv.yaml, .devenv/gc, src/bin/rsdk, or utils.sh
 Diagnose the Docker networking case on the host:
 
 ```bash
-docker run --rm debian:bookworm bash -lc 'apt-get update'
-docker run --rm --network host debian:bookworm bash -lc 'apt-get update'
+docker run --rm debian:stable-slim bash -lc 'apt-get update'
+docker run --rm --network host debian:stable-slim bash -lc 'apt-get update'
 ```
 
 If the first command fails or hangs but the second succeeds, Docker image pulls
@@ -283,7 +283,7 @@ When the bridge test fails and the host-network test succeeds, the script can
 apply the affected-VM workaround:
 
 ```bash
-scripts/rsdk_setup/bookworm_rsdk_host_steps_1_4.sh --force-devcontainer-hostnet-workaround
+scripts/rsdk_setup/rsdk_host_setup.sh --force-devcontainer-hostnet-workaround
 ```
 
 In automatic mode, the script applies the workaround only when it detects the
