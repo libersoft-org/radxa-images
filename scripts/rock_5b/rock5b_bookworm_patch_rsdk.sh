@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 SCRIPT_NAME="$(basename "$0")"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RSDK_DIR_ARG=""
 RSDK_DIR=""
 DRY_RUN=0
@@ -11,12 +12,15 @@ PRODUCTS_REL="src/share/rsdk/configs/products.json"
 SOC_RECOMMENDS_REL="src/share/rsdk/configs/soc_install_recommends.libjsonnet"
 CLI_PACKAGES_REL="src/share/rsdk/build/mod/packages/cli.libjsonnet"
 BUILD_HELPER_NAME="build-rock5b-bookworm-cli.sh"
+DEFAULT_ROOT_HELPER_NAME="set-rock5b-default-root.sh"
+DEFAULT_ROOT_HELPER_SOURCE="$SCRIPT_DIR/rock5b_bookworm_default_root.sh"
 
 PRODUCTS_JSON=""
 PRODUCTS_BACKUP=""
 SOC_RECOMMENDS=""
 CLI_PACKAGES=""
 BUILD_HELPER=""
+DEFAULT_ROOT_HELPER=""
 
 usage() {
   cat <<EOF
@@ -126,6 +130,7 @@ resolve_paths() {
   SOC_RECOMMENDS="$RSDK_DIR/$SOC_RECOMMENDS_REL"
   CLI_PACKAGES="$RSDK_DIR/$CLI_PACKAGES_REL"
   BUILD_HELPER="$RSDK_DIR/$BUILD_HELPER_NAME"
+  DEFAULT_ROOT_HELPER="$RSDK_DIR/$DEFAULT_ROOT_HELPER_NAME"
 }
 
 require_command() {
@@ -457,6 +462,33 @@ patch_build_helper() {
   ok "Created executable build helper: $BUILD_HELPER"
 }
 
+patch_default_root_helper() {
+  if [ ! -f "$DEFAULT_ROOT_HELPER_SOURCE" ]; then
+    die "Default-root helper source is missing: $DEFAULT_ROOT_HELPER_SOURCE"
+  fi
+
+  if [ -f "$DEFAULT_ROOT_HELPER" ] &&
+    cmp -s "$DEFAULT_ROOT_HELPER_SOURCE" "$DEFAULT_ROOT_HELPER" &&
+    [ -x "$DEFAULT_ROOT_HELPER" ]; then
+    ok "Default-root helper already exists and is executable: $DEFAULT_ROOT_HELPER"
+    return 0
+  fi
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    if [ -f "$DEFAULT_ROOT_HELPER" ]; then
+      info "Would update default-root helper: $DEFAULT_ROOT_HELPER"
+    else
+      info "Would create default-root helper: $DEFAULT_ROOT_HELPER"
+    fi
+    info "Would chmod +x: $DEFAULT_ROOT_HELPER"
+    return 0
+  fi
+
+  cp "$DEFAULT_ROOT_HELPER_SOURCE" "$DEFAULT_ROOT_HELPER"
+  chmod +x "$DEFAULT_ROOT_HELPER"
+  ok "Created executable default-root helper: $DEFAULT_ROOT_HELPER"
+}
+
 check_soc_recommends() {
   if grep -q 'std\.all' "$SOC_RECOMMENDS"; then
     die "soc_install_recommends.libjsonnet still contains std.all: $SOC_RECOMMENDS"
@@ -483,12 +515,20 @@ check_build_helper() {
   ok "Build helper exists and is executable: $BUILD_HELPER"
 }
 
+check_default_root_helper() {
+  [ -f "$DEFAULT_ROOT_HELPER" ] || die "Default-root helper is missing: $DEFAULT_ROOT_HELPER"
+  [ -x "$DEFAULT_ROOT_HELPER" ] || die "Default-root helper exists but is not executable: $DEFAULT_ROOT_HELPER"
+
+  ok "Default-root helper exists and is executable: $DEFAULT_ROOT_HELPER"
+}
+
 run_check_only() {
   info "Check-only mode: no files will be changed."
   patch_products_json check
   check_soc_recommends
   check_cli_packages
   check_build_helper
+  check_default_root_helper
   ok "RSDK patch check passed."
 }
 
@@ -531,6 +571,9 @@ Next:
 Inside the devcontainer:
   cd /workspaces/rsdk
   ./build-rock5b-bookworm-cli.sh
+
+Optional, after the image build finishes:
+  ./set-rock5b-default-root.sh
 EOF
 }
 
@@ -554,6 +597,7 @@ main() {
   patch_soc_recommends
   patch_cli_packages
   patch_build_helper
+  patch_default_root_helper
 
   if [ "$DRY_RUN" -eq 1 ]; then
     ok "Dry run complete. No files were changed."
