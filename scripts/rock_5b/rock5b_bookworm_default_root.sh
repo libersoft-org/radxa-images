@@ -45,6 +45,10 @@ ok() {
   log "[OK] $*"
 }
 
+warn() {
+  log "[WARN] $*" >&2
+}
+
 die() {
   log "[ERROR] $*" >&2
   exit 1
@@ -226,10 +230,34 @@ EOF
   ls -lh rootfs.tar "$backup"
 }
 
+ensure_kvm_access() {
+  if [ ! -e /dev/kvm ]; then
+    warn "/dev/kvm does not exist; libguestfs will run without KVM acceleration."
+    return 0
+  fi
+
+  if [ -r /dev/kvm ] && [ -w /dev/kvm ]; then
+    ok "/dev/kvm is accessible to the current user."
+    return 0
+  fi
+
+  info "/dev/kvm is not accessible to the current user; applying immediate chmod 0666 workaround."
+  as_root chmod 0666 /dev/kvm
+
+  if [ -r /dev/kvm ] && [ -w /dev/kvm ]; then
+    ok "/dev/kvm is accessible now."
+    return 0
+  fi
+
+  warn "Could not make /dev/kvm accessible; libguestfs may run slowly."
+}
+
 rebuild_output_image() {
   cd "$OUT_DIR"
 
   export PATH="/usr/sbin:/sbin:/usr/bin:/bin:$PATH"
+
+  ensure_kvm_access
 
   info "Regenerating output.img from modified rootfs.tar."
   as_root rm -f output.img
@@ -250,6 +278,7 @@ main() {
   require_command tar
   require_command tee
   require_command chroot
+  require_command chmod
   if [ "$(id -u)" -ne 0 ]; then
     require_command sudo
   fi
