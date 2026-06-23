@@ -172,14 +172,26 @@ git clone https://github.com/libersoft-org/radxa-images.git /root/radxa-images
 cd /root/radxa-images
 ```
 
-Fast path with a prebuilt Mesa archive:
+Recommended path with the official prebuilt Mesa PanVK bundle:
 
 ```sh
-scripts/rock_5b/on_device/rock5b_bookworm_chromium_vulkan_on_device.sh \
-  --mesa-url https://example.com/rock5b-mesa-git-25.3.6-panvk.tar.zst
+scripts/rock_5b/on_device/rock5b_bookworm_chromium_vulkan_on_device.sh
 ```
 
-Build Mesa directly on the board:
+By default, the script downloads and verifies:
+
+```text
+Archive:
+https://github.com/libersoft-org/radxa-images/releases/latest/download/rock5b-mesa-panvk-bookworm-aarch64.tar.zst
+
+Checksum:
+https://github.com/libersoft-org/radxa-images/releases/latest/download/rock5b-mesa-panvk-bookworm-aarch64.tar.zst.sha256
+
+SHA256:
+17c39a55dc860937e0af23eca426b5d7aff3b6eebac9770dfaa98cd34653a66c
+```
+
+Source build fallback/debug mode:
 
 ```sh
 scripts/rock_5b/on_device/rock5b_bookworm_chromium_vulkan_on_device.sh \
