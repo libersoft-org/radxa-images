@@ -157,3 +157,50 @@ Detailed build, customization, compression, checksum, and flashing notes:
 
 - [**ROCK 5B Bookworm CLI image guide**](./scripts/rock_5b/rock5b_bookworm_cli_repo_readme_en.md)
 - [**Radxa ZERO 3W / ZERO 3 Bookworm CLI image guide**](./scripts/zero_3w/radxa_zero3w_bookworm_cli_repo_readme_en.md)
+
+## 5.
+
+Install Chromium Vulkan on a running ROCK 5B.
+
+On the ROCK 5B itself, after booting the flashed image:
+
+```sh
+sudo -i
+apt update
+apt install -y git ca-certificates
+git clone https://github.com/libersoft-org/radxa-images.git /root/radxa-images
+cd /root/radxa-images
+```
+
+Fast path with a prebuilt Mesa archive:
+
+```sh
+scripts/rock_5b/on_device/rock5b_bookworm_chromium_vulkan_on_device.sh \
+  --mesa-url https://example.com/rock5b-mesa-git-25.3.6-panvk.tar.zst
+```
+
+Build Mesa directly on the board:
+
+```sh
+scripts/rock_5b/on_device/rock5b_bookworm_chromium_vulkan_on_device.sh \
+  --build-mesa \
+  --jobs 8
+```
+
+The script installs Chromium, Xorg runtime packages, Mesa PanVK in
+`/opt/mesa-git`, starts Chromium on the main display, and verifies Vulkan.
+After it finishes, use:
+
+```sh
+start-chromium-vulkan
+verify-chromium-vulkan
+stop-chromium-vulkan
+```
+
+Expected verify result:
+
+```text
+vulkan: enabled_on
+Skia Backend: GaneshVulkan
+GPU0: Mali-G610 (Panfrost), Mesa 25.3.6
+```
