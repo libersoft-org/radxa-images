@@ -532,70 +532,23 @@ tty1 root autologin: enabled
 Inside the container:
 
 ```bash
-cd /workspaces/rsdk/out/rock-5b_bookworm_cli
-
-rm -rf rootfs-edit
-
-mkdir -p rootfs-edit
-
-sudo tar -xf rootfs.tar -C rootfs-edit
-
-sudo chroot rootfs-edit /bin/bash -c 'echo "root:root" | chpasswd'
-sudo chroot rootfs-edit /bin/bash -c 'passwd -u root || true'
-sudo chroot rootfs-edit /bin/bash -c 'usermod -s /bin/bash root'
-
-sudo mkdir -p rootfs-edit/etc/ssh/sshd_config.d
-
-sudo tee rootfs-edit/etc/ssh/sshd_config.d/99-root-login.conf >/dev/null <<'EOF'
-PermitRootLogin yes
-PasswordAuthentication yes
-KbdInteractiveAuthentication yes
-EOF
-
-sudo chroot rootfs-edit /bin/bash -c 'systemctl enable ssh || true'
-
-sudo mkdir -p rootfs-edit/etc/systemd/system/getty@tty1.service.d
-
-sudo tee rootfs-edit/etc/systemd/system/getty@tty1.service.d/override.conf >/dev/null <<'EOF'
-[Service]
-ExecStart=
-ExecStart=-/sbin/agetty --autologin root --noclear %I $TERM
-EOF
-
-sudo chroot rootfs-edit /bin/bash -c 'systemctl enable getty@tty1.service || true'
-
-sudo tee rootfs-edit/etc/issue >/dev/null <<'EOF'
-ROCK 5B Bookworm CLI
-
-Default login:
-  user: root
-  pass: root
-
-CHANGE THIS PASSWORD IMMEDIATELY.
-
-EOF
-
-mv rootfs.tar rootfs.tar.before-root-default
-
-sudo tar --numeric-owner -cpf rootfs.tar -C rootfs-edit .
-
-sudo rm -rf rootfs-edit
-
-ls -lh rootfs.tar rootfs.tar.before-root-default
+cd /workspaces/rsdk
+./set-rock5b-default-root.sh
 ```
 
-Generate a new `output.img` from the modified `rootfs.tar`:
+The helper edits:
 
-```bash
-cd /workspaces/rsdk/out/rock-5b_bookworm_cli
+```text
+/workspaces/rsdk/out/rock-5b_bookworm_cli/rootfs.tar
+```
 
-export PATH="/usr/sbin:/sbin:/usr/bin:/bin:$PATH"
+It backs up the original rootfs, sets root login defaults, and regenerates
+`output.img` by running the target output directory's `build-image` script.
 
-rm -f output.img
+Expected final image:
 
-./build-image
-
-ls -lh output.img
+```text
+/workspaces/rsdk/out/rock-5b_bookworm_cli/output.img
 ```
 
 ## 12. Leave the Container
