@@ -189,6 +189,22 @@ apt_install_if_available() {
   fi
 }
 
+apt_install_first_available() {
+  local package
+
+  apt_update_once
+  for package in "$@"; do
+    if apt-cache show "$package" >/dev/null 2>&1; then
+      export DEBIAN_FRONTEND=noninteractive
+      apt install -y "$package"
+      return 0
+    fi
+  done
+
+  warn "None of these optional packages are available: $*"
+  return 0
+}
+
 install_runtime_packages() {
   log "Install runtime packages"
 
@@ -226,8 +242,10 @@ install_build_packages() {
     clang-15 libclang-15-dev libclang-cpp15-dev
 
   apt_install_if_available \
-    meson llvm-dev clang libclang-dev libclang-cpp-dev \
-    libclc-15-dev libclc-19-dev llvm-spirv-15 libllvmspirvlib-15-dev
+    meson llvm-spirv-15 libllvmspirvlib-15-dev
+
+  apt_install_first_available \
+    libclc-19-dev libclc-15-dev
 }
 
 configure_xwrapper() {
