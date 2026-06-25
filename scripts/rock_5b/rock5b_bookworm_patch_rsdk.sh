@@ -144,7 +144,14 @@ git_rsdk() {
 validate_rsdk_dir() {
   info "RSDK dir: $RSDK_DIR"
 
-  [ -d "$RSDK_DIR" ] || die "RSDK directory does not exist: $RSDK_DIR"
+  if [ ! -d "$RSDK_DIR" ]; then
+    if [ "$RSDK_DIR" = "/workspaces/rsdk" ] && [ -d "$HOME/rsdk" ]; then
+      die "RSDK directory does not exist: $RSDK_DIR. You appear to be on the host, where the checkout is likely $HOME/rsdk. Try: $SCRIPT_NAME --rsdk-dir ~/rsdk"
+    fi
+
+    die "RSDK directory does not exist: $RSDK_DIR"
+  fi
+
   [ -f "$PRODUCTS_JSON" ] || die "Missing RSDK products config: $PRODUCTS_JSON"
   [ -f "$SOC_RECOMMENDS" ] || die "Missing RSDK Jsonnet config: $SOC_RECOMMENDS"
   [ -f "$CLI_PACKAGES" ] || die "Missing RSDK CLI package config: $CLI_PACKAGES"
@@ -572,7 +579,10 @@ Inside the devcontainer:
   cd /workspaces/rsdk
   ./build-rock5b-bookworm-cli.sh
 
-Optional, after the image build finishes:
+Optional, after the image build finishes, enable SSH only:
+  ./set-rock5b-default-root.sh --ssh-only
+
+Optional, after the image build finishes, enable default root access too:
   ./set-rock5b-default-root.sh
 EOF
 }

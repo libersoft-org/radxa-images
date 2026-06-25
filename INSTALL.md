@@ -89,6 +89,14 @@ cd /workspaces/rsdk
 ./build-rock5b-bookworm-cli.sh
 ```
 
+Optional, enable SSH in the built image without changing root login:
+
+```sh
+./set-rock5b-default-root.sh --ssh-only
+```
+
+This keeps Radxa's first-boot `before.txt` from disabling SSH.
+
 Optional, enable default root access in the built image:
 
 ```sh
