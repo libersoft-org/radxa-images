@@ -8,6 +8,13 @@ RSDK_DIR=""
 OUT_DIR=""
 ROOTFS_EDIT="rootfs-edit"
 ROOTFS_BACKUP_BASE="rootfs.tar.before-root-default"
+FIRST_BOOT_MARKER="# radxa-images: keep SSH enabled for this provisioned image"
+SSH_ONLY=0
+
+# DevContainer users may not have admin tool directories in PATH, but helpers
+# such as chroot usually live in /usr/sbin.
+PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
+export PATH
 
 usage() {
   cat <<EOF
@@ -24,6 +31,8 @@ Options:
                           when run from an RSDK checkout, then /workspaces/rsdk.
   --out-dir DIR           ROCK 5B output directory. Default:
                           <rsdk-dir>/out/rock-5b_bookworm_cli
+  --ssh-only              Enable SSH after first boot without setting the root
+                          password, root SSH login, or tty1 autologin.
   -h, --help              Show this help.
 
 Examples:
@@ -66,6 +75,10 @@ parse_args() {
         [ "${2:-}" != "" ] || die "--out-dir requires a value"
         OUT_DIR_ARG="$2"
         shift 2
+        ;;
+      --ssh-only)
+        SSH_ONLY=1
+        shift
         ;;
       -h | --help)
         usage
@@ -185,13 +198,9 @@ ensure_openssh_server_in_rootfs() {
 enable_systemd_unit_in_rootfs() {
   local unit="$1"
   local unit_file="$unit"
+  local wants_link="$ROOTFS_EDIT/etc/systemd/system/multi-user.target.wants/$unit"
 
-  if as_root systemctl --root="$ROOTFS_EDIT" enable "$unit" &&
-    as_root systemctl --root="$ROOTFS_EDIT" is-enabled --quiet "$unit"; then
-    return 0
-  fi
-
-  warn "systemctl enable $unit did not leave the unit enabled in rootfs; creating wants symlink directly."
+  info "Enabling systemd unit in rootfs: $unit"
   if [ ! -e "$ROOTFS_EDIT/lib/systemd/system/$unit_file" ] && [ ! -e "$ROOTFS_EDIT/usr/lib/systemd/system/$unit_file" ] && [[ "$unit_file" == *@*.service ]]; then
     unit_file="${unit_file%@*}@.service"
   fi
@@ -200,23 +209,71 @@ enable_systemd_unit_in_rootfs() {
   as_root mkdir -p "$ROOTFS_EDIT/etc/systemd/system/multi-user.target.wants"
 
   if [ -e "$ROOTFS_EDIT/lib/systemd/system/$unit_file" ]; then
-    as_root ln -sf "/lib/systemd/system/$unit_file" "$ROOTFS_EDIT/etc/systemd/system/multi-user.target.wants/$unit"
+    as_root ln -sf "/lib/systemd/system/$unit_file" "$wants_link"
   else
-    as_root ln -sf "/usr/lib/systemd/system/$unit_file" "$ROOTFS_EDIT/etc/systemd/system/multi-user.target.wants/$unit"
+    as_root ln -sf "/usr/lib/systemd/system/$unit_file" "$wants_link"
   fi
 
-  as_root systemctl --root="$ROOTFS_EDIT" is-enabled --quiet "$unit" || die "Failed to enable systemd unit in rootfs: $unit"
+  [ -e "$wants_link" ] || [ -L "$wants_link" ] || die "Failed to enable systemd unit in rootfs: $unit"
 }
 
 verify_rootfs_tar_path() {
   local path="$1"
 
-  if as_root tar -tf rootfs.tar | grep -Eq "^\\.?/?$path$"; then
+  if as_root tar -tf rootfs.tar | awk -v path="$path" '
+    {
+      entry = $0
+      sub(/^\.\//, "", entry)
+      sub(/^\//, "", entry)
+      if (entry == path) found = 1
+    }
+    END { exit found ? 0 : 1 }
+  '; then
     ok "Verified in rootfs.tar: $path"
     return 0
   fi
 
   die "Packed rootfs.tar does not contain expected path: $path"
+}
+
+verify_rootfs_tar_file_contains() {
+  local path="$1"
+  local pattern="$2"
+
+  if as_root tar -xOf rootfs.tar "./$path" 2>/dev/null | awk -v pattern="$pattern" '
+    $0 ~ pattern { found = 1 }
+    END { exit found ? 0 : 1 }
+  '; then
+    ok "Verified in rootfs.tar: $path contains $pattern"
+    return 0
+  fi
+
+  die "Packed rootfs.tar does not contain expected content in $path: $pattern"
+}
+
+patch_radxa_first_boot_config_file() {
+  local path="$1"
+
+  [ -f "$path" ] || return 0
+
+  info "Patching Radxa first-boot config: $path"
+  as_root sed -i -E \
+    -e 's/^([[:space:]]*)disable_service[[:space:]]+ssh([[:space:]]*)$/# radxa-images: disabled original first-boot SSH shutdown: disable_service ssh/' \
+    -e 's/^([[:space:]]*)disable_service[[:space:]]+ssh\.socket([[:space:]]*)$/# radxa-images: disabled original first-boot SSH socket shutdown: disable_service ssh.socket/' \
+    "$path"
+
+  if ! as_root grep -Fqx "$FIRST_BOOT_MARKER" "$path"; then
+    write_file_as_root "$path.append" <<EOF
+$FIRST_BOOT_MARKER
+enable_service ssh
+EOF
+    as_root sh -c 'cat "$1" >> "$2" && rm -f "$1"' sh "$path.append" "$path"
+  fi
+}
+
+keep_ssh_enabled_after_radxa_first_boot() {
+  patch_radxa_first_boot_config_file "$ROOTFS_EDIT/config/before.txt"
+  patch_radxa_first_boot_config_file "$ROOTFS_EDIT/usr/share/doc/rsetup-config-first-boot/before.txt"
 }
 
 set_default_root_in_rootfs() {
@@ -230,33 +287,44 @@ set_default_root_in_rootfs() {
   as_root mkdir -p "$ROOTFS_EDIT"
   as_root tar -xf rootfs.tar -C "$ROOTFS_EDIT"
 
-  info "Setting root password to root and enabling root shell."
-  as_root chroot "$ROOTFS_EDIT" /bin/bash -c 'echo "root:root" | chpasswd'
-  as_root chroot "$ROOTFS_EDIT" /bin/bash -c 'passwd -u root || true'
-  as_root chroot "$ROOTFS_EDIT" /bin/bash -c 'usermod -s /bin/bash root'
+  if [ "$SSH_ONLY" -eq 0 ]; then
+    info "Setting root password to root and enabling root shell."
+    as_root chroot "$ROOTFS_EDIT" /bin/bash -c 'echo "root:root" | chpasswd'
+    as_root chroot "$ROOTFS_EDIT" /bin/bash -c 'passwd -u root || true'
+    as_root chroot "$ROOTFS_EDIT" /bin/bash -c 'usermod -s /bin/bash root'
+  else
+    info "SSH-only mode: leaving root password and root shell unchanged."
+  fi
 
-  info "Enabling SSH server and root login."
+  info "Enabling SSH server."
   ensure_openssh_server_in_rootfs
-  as_root mkdir -p "$ROOTFS_EDIT/etc/ssh/sshd_config.d"
-  write_file_as_root "$ROOTFS_EDIT/etc/ssh/sshd_config.d/99-root-login.conf" <<'EOF'
+  if [ "$SSH_ONLY" -eq 0 ]; then
+    info "Enabling SSH root login."
+    as_root mkdir -p "$ROOTFS_EDIT/etc/ssh/sshd_config.d"
+    write_file_as_root "$ROOTFS_EDIT/etc/ssh/sshd_config.d/99-root-login.conf" <<'EOF'
 PermitRootLogin yes
 PasswordAuthentication yes
 KbdInteractiveAuthentication yes
 EOF
+  else
+    info "SSH-only mode: leaving SSH root-login policy unchanged."
+  fi
   as_root chroot "$ROOTFS_EDIT" /bin/bash -c 'ssh-keygen -A'
   enable_systemd_unit_in_rootfs ssh.service
+  keep_ssh_enabled_after_radxa_first_boot
 
-  info "Enabling tty1 root autologin."
-  as_root mkdir -p "$ROOTFS_EDIT/etc/systemd/system/getty@tty1.service.d"
-  write_file_as_root "$ROOTFS_EDIT/etc/systemd/system/getty@tty1.service.d/override.conf" <<'EOF'
+  if [ "$SSH_ONLY" -eq 0 ]; then
+    info "Enabling tty1 root autologin."
+    as_root mkdir -p "$ROOTFS_EDIT/etc/systemd/system/getty@tty1.service.d"
+    write_file_as_root "$ROOTFS_EDIT/etc/systemd/system/getty@tty1.service.d/override.conf" <<'EOF'
 [Service]
 ExecStart=
 ExecStart=-/sbin/agetty --autologin root --noclear %I $TERM
 EOF
-  enable_systemd_unit_in_rootfs getty@tty1.service
+    enable_systemd_unit_in_rootfs getty@tty1.service
 
-  info "Writing login notice."
-  write_file_as_root "$ROOTFS_EDIT/etc/issue" <<'EOF'
+    info "Writing login notice."
+    write_file_as_root "$ROOTFS_EDIT/etc/issue" <<'EOF'
 ROCK 5B Bookworm CLI
 
 Default login:
@@ -266,6 +334,9 @@ Default login:
 CHANGE THIS PASSWORD IMMEDIATELY.
 
 EOF
+  else
+    info "SSH-only mode: leaving tty1 autologin and login notice unchanged."
+  fi
 
   info "Backing up rootfs.tar to $backup."
   as_root mv rootfs.tar "$backup"
@@ -277,7 +348,11 @@ EOF
   as_root rm -rf "$ROOTFS_EDIT"
 
   verify_rootfs_tar_path "etc/systemd/system/multi-user.target.wants/ssh.service"
-  verify_rootfs_tar_path "etc/ssh/sshd_config.d/99-root-login.conf"
+  verify_rootfs_tar_file_contains "config/before.txt" "^# radxa-images: disabled original first-boot SSH shutdown: disable_service ssh$"
+  verify_rootfs_tar_file_contains "config/before.txt" "^enable_service ssh$"
+  if [ "$SSH_ONLY" -eq 0 ]; then
+    verify_rootfs_tar_path "etc/ssh/sshd_config.d/99-root-login.conf"
+  fi
 
   ok "Rootfs updated."
   ls -lh rootfs.tar "$backup"
@@ -294,15 +369,7 @@ ensure_kvm_access() {
     return 0
   fi
 
-  info "/dev/kvm is not accessible to the current user; applying immediate chmod 0666 workaround."
-  as_root chmod 0666 /dev/kvm
-
-  if [ -r /dev/kvm ] && [ -w /dev/kvm ]; then
-    ok "/dev/kvm is accessible now."
-    return 0
-  fi
-
-  warn "Could not make /dev/kvm accessible; libguestfs may run slowly."
+  warn "/dev/kvm is not accessible to the current user; libguestfs may run slowly."
 }
 
 rebuild_output_image() {
@@ -343,11 +410,24 @@ main() {
   cat <<EOF
 
 Done.
+EOF
+
+  if [ "$SSH_ONLY" -eq 1 ]; then
+    cat <<EOF
+SSH enabled:
+  Radxa first-boot config will keep ssh.service enabled
+  root password/root SSH login/tty1 autologin: unchanged
+EOF
+  else
+    cat <<EOF
 Default access enabled:
   root password: root
   SSH root login: enabled
   tty1 root autologin: enabled
+EOF
+  fi
 
+  cat <<EOF
 Image:
   $OUT_DIR/output.img
 EOF

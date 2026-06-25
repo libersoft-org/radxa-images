@@ -517,9 +517,19 @@ ls -lh out/rock-5b_bookworm_cli/output.img
 
 ---
 
-## 11. Optional: Set Default root/root in the rootfs
+## 11. Optional: Enable SSH or Set Default root/root in the rootfs
 
 This step is optional. Use it only for development or provisioning images.
+
+To enable SSH without changing root login:
+
+```bash
+cd /workspaces/rsdk
+./set-rock5b-default-root.sh --ssh-only
+```
+
+This patches Radxa's first-boot `before.txt` so it keeps `ssh.service` enabled
+instead of disabling it during first boot.
 
 Result:
 
